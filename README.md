@@ -28,7 +28,7 @@ Experimental H3 audio-video adaptation (not paper-validated). Two modes:
 - **External upscaler (default)**: an installed H3 checkpoint with `rho=0` — a learned latent-only lift. Practical default, but not SelfLift-zero.
 - **SelfLift-zero**: `upscaler_model=none` with `rho>0`. Suggested H3 starting point: `rho=0.6`, `w_min=w_max=1` (see *Diagnosing H3*).
 
-Extra inputs: `upscaler_model` and `highres_tiling` (experimental: splits the high-res phase into 1–8 spatial tiles to save VRAM; only the first tile's audio is kept, there is no cross-tile attention, ControlNet is unsupported, and quality/speed may change).
+Extra inputs: `upscaler_model`, `upscaler_unload` (default on: unloads the upscaler from VRAM right after the lift, before the high-resolution stage) and `highres_tiling` (experimental: splits the high-res phase into 1–8 spatial tiles to save VRAM; only the first tile's audio is kept, there is no cross-tile attention, ControlNet is unsupported, and quality/speed may change).
 
 ### Optional H3 upscaler
 

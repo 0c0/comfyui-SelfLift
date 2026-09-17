@@ -345,10 +345,13 @@ def _inference_memory_required(model, z0_low, out_hw):
     return feature_elements * model.conv_in.weight.element_size() * 8
 
 
-def learned_latent_lift(z0_low, out_hw, model_name, device=None):
+def learned_latent_lift(z0_low, out_hw, model_name, device=None, force_unload=False):
     """2D/3D learned upsample of the low-res clean endpoint to the target latent size.
 
     z0_low: [B, 24, T, h, w] H3 video latent in VAE space. Returns [B, 24, T, H, W].
+
+    force_unload: unload the upscaler from VRAM when the lift finishes (also on error).
+    The patcher stays in `_model_cache`, so the next lift reloads it without re-reading the file.
     """
     H, W = out_hw
     if device is None:
@@ -375,16 +378,23 @@ def learned_latent_lift(z0_low, out_hw, model_name, device=None):
                  H / h, W / w, scale - 1.0, "identity" if identity else "chunked" if chunked else "full",
                  chunk, overlap if chunked else 0, len(windows) if chunked else int(not identity),
                  actual_window if not identity else 0, budget_window, memory_required / 2**20)
-    comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
-    log_memory("upscaler after_load", device)
-    dtype = model.conv_in.weight.dtype
-    mean = torch.tensor(LATENTS_MEAN, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
-    std = torch.tensor(LATENTS_STD, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
+    try:
+        comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
+        log_memory("upscaler after_load", device)
+        dtype = model.conv_in.weight.dtype
+        mean = torch.tensor(LATENTS_MEAN, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
+        std = torch.tensor(LATENTS_STD, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
 
-    x = z0_low.to(device=device, dtype=dtype)
-    with torch.no_grad():
-        x = (x - mean) / std
-        out = model(x, scale=scale, target_size=(z0_low.shape[2], H, W))
-        out = (out * std + mean).float().to(comfy.model_management.intermediate_device())
-    log_memory("upscaler end", device)
-    return out
+        x = z0_low.to(device=device, dtype=dtype)
+        with torch.no_grad():
+            x = (x - mean) / std
+            out = model(x, scale=scale, target_size=(z0_low.shape[2], H, W))
+            out = (out * std + mean).float().to(comfy.model_management.intermediate_device())
+        log_memory("upscaler end", device)
+        return out
+    finally:
+        if force_unload:
+            # The high-resolution stage runs right after the lift and never needs the upscaler again.
+            comfy.model_management.unload_model_and_clones(patcher, unload_additional_models=False)
+            comfy.model_management.soft_empty_cache()
+            log_memory("upscaler after_unload", device)
