@@ -353,6 +353,13 @@ def learned_latent_lift(z0_low, out_hw, model_name, device=None, force_unload=Fa
     force_unload: unload the upscaler from VRAM when the lift finishes (also on error).
     The patcher stays in `_model_cache`, so the next lift reloads it without re-reading the file.
     """
+    # H3 sampler output may be NestedTensor((video_stream, audio_stream, ...)):
+    # lift only the video stream, pass every other stream through untouched.
+    if hasattr(z0_low, "tensors") and hasattr(z0_low, "is_nested"):
+        streams = list(z0_low.tensors)
+        streams[0] = learned_latent_lift(streams[0], out_hw, model_name,
+                                         device=device, force_unload=force_unload)
+        return type(z0_low)(streams)
     H, W = out_hw
     if device is None:
         device = comfy.model_management.get_torch_device()
