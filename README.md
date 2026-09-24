@@ -34,6 +34,34 @@ Extra inputs: `upscaler_model`, `upscaler_unload` (default on: unloads the upsca
 
 Download from [LBH-123-AI/Minimax_h3_latent_Upscaler](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) into `ComfyUI/models/latent_upscale_models/` and restart. The node selects the first filename containing `h3`, otherwise `none` (nearest-neighbor lift).
 
+## Fork additions (gateway-oriented, by @0c0)
+
+This fork adds three things the upstream pack does not ship; they were built for
+single-call REST/MCP gateways (no interactive wiring) but work in plain ComfyUI too.
+No new pip dependencies — everything runs on torch + the ComfyUI core already required
+by this pack.
+
+- **`SelfLiftH3LatentLift`** (`lift_node.py`): exposes `h3_upscaler.learned_latent_lift`
+  as a standalone node. Lift an already-sampled native-resolution H3 latent without
+  re-sampling — deterministic, composition-preserving. Typical chain:
+  `KSampler (native) -> SelfLiftH3LatentLift -> VAE Decode`.
+  Optional SelfLift-zero correction via `rho` (requires the video VAE input).
+- **`SelfLiftH3LatentSave` / `SelfLiftH3LatentLoad`** (`latent_io.py`): persist an H3
+  NestedTensor latent (video + audio streams) as `.latent.safetensors` and load it back,
+  so the expensive native-resolution stage can be cached and re-used.
+- **NestedTensor-safe `learned_latent_lift`**: the H3 sampler returns a NestedTensor of
+  (video, audio, ...) streams; the entry point now lifts only the video stream and passes
+  every other stream through untouched, so any external caller can feed it the raw
+  sampler output (older forks crashed in `F.pad` with `must be Tensor, not NestedTensor`).
+
+Dependency reminders for the two lift-related items:
+
+- The upscaler weights are the **same file** the H3 sampler uses above
+  (`minimax_h3_latent_upscaler_3d_fp16.safetensors` under `ComfyUI/models/latent_upscale_models/`).
+- `latent_io` round-trips need a ComfyUI core that ships `comfy.nested_tensor` (any recent
+  version); the lift entry point itself falls back gracefully on cores that only produce
+  plain latents.
+
 ## H3 Temporal State Transport (TST)
 
 A `MODEL` → `MODEL` patch node that improves the temporal stability of H3 videos at inference time — no training, no extra model, ~1–2% runtime overhead. Typical problems it counteracts: details that flicker or morph between frames (logos, on-screen text, textures), identity drift of people and outfits, and physically implausible motion. It works with any standard sampler node, not only the SelfLift sampler. It cannot create detail the model does not have.
